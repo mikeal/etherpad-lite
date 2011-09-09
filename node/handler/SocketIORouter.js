@@ -127,7 +127,7 @@ exports.setSocketIO = function(_socket)
         }
         //drop message
         else
-        {
+        {          
           messageLogger.warn("Droped message cause of bad permissions:" + stringifyWithoutPassword(message));
         }
       }

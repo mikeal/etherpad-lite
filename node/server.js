@@ -69,7 +69,39 @@ async.waterfall([
   //initalize the database
   function (callback)
   {
-    db.init(callback);
+    db.init(function () {
+      if (db.db.db.wrappedDB.emit) {
+        var metrics = require('./metrics')
+          , initTimer = metrics.timer('db.init')
+          , getTimer = metrics.timer('db.get')
+          , setTimer = metrics.timer('db.set')
+          , removeTimer = metrics.timer('db.remove')
+          , bulkTimer = metrics.timer('db.bulk')
+          , dbHistogram = metrics.histogram('db.ops')
+          ;
+        db.db.db.wrappedDB.on('metric.init', function (duration) {
+          initTimer.update(duration)
+          dbHistogram.update('init', (new Date()).getTime())
+        })
+        db.db.db.wrappedDB.on('metric.get', function (duration) {
+          getTimer.update(duration)
+          dbHistogram.update('get', (new Date()).getTime())
+        })
+        db.db.db.wrappedDB.on('metric.set', function (duration) {
+          setTimer.update(duration)
+          dbHistogram.update('set', (new Date()).getTime())
+        })
+        db.db.db.wrappedDB.on('metric.remove', function (duration) {
+          removeTimer.update(duration)
+          dbHistogram.update('remove', (new Date()).getTime())
+        })
+        db.db.db.wrappedDB.on('metric.bulk', function (duration) {
+          bulkTimer.update(duration)
+          dbHistogram.update('bulk', (new Date()).getTime())
+        })
+      }
+      callback.apply(this, arguments)
+    });
   },
   //initalize the http server
   function (callback)

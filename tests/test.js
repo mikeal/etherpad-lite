@@ -22,6 +22,8 @@ function joinPad (c, cb) {
     , "type": "CLIENT_READY"
     , "padId": c.padid
     , "token": c.token
+    , "sessionID": null
+    , "password": null
     , "protocolVersion":2
     }
   )
@@ -74,7 +76,9 @@ function joinPad (c, cb) {
   
   c.applyChanges = function (changes, cb) {
     var applychange = function (change) {
+      console.log('apply change')
       c.applyChange(change[0], change[1], function () {
+        console.log('applied changed. '+changes.length+' left.')
         if (changes.length === 0) cb()
         else applychange(changes.shift())
       })
@@ -107,7 +111,7 @@ function megajoin (limit) {
   console.log(clients.map(function (c) {return c.token}))
 }
 
-function testpads (padlimit, clientsPerPad) {
+function testpads (padlimit, clientsPerPad, cb) {
   var i = 0
     , pads = []
     , clients = []
@@ -129,14 +133,35 @@ function testpads (padlimit, clientsPerPad) {
       counts--
       if (counts === 0) {
         console.error('finished.')
-        clients.forEach(function (c) {c.disconnect()})
+        cb()
       }
     })
   })
-  
+  return clients;
 }
 
-testpads(100, 10)
+function testwrites (pads, clients) {
+  var clients = testpads(pads, clients, function () {
+    console.log('all joined')
+    var padmap = {}
+    clients.forEach(function (c) {
+      if (!padmap[c.padid]) padmap[c.padid] = []
+      padmap[c.padid].push(c) 
+    })
+    for (i in padmap) {
+      (function (i) {
+        console.error('applying changes')
+        padmap[i][0].applyChanges(sample.map(function (s) { return [s.data.changeset, s.data.apool] }), function () {
+          console.log('finished writing to '+padmap[i][0].padid)
+        }) 
+      })(i)
+    }
+  })
+}
+
+// testpads(10, 10)
+
+testwrites(1, 10)
 
 // megajoin(1000)
 

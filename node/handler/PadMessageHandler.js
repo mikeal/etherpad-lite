@@ -29,6 +29,7 @@ var securityManager = require("../db/SecurityManager");
 var log4js = require('log4js');
 var os = require("os");
 var messageLogger = log4js.getLogger("message");
+var metrics = require('../metrics')
 
 /**
  * A associative array that translates a session to a pad
@@ -151,6 +152,16 @@ exports.handleDisconnect = function(client)
  * @param client the client that send this message
  * @param message the message from the client
  */
+ 
+var timers = 
+  { CLIENT_READY: metrics.timer('message.CLIENT_READY')
+  , notify_CLIENT_READY: metrics.timer('message.notify.CLIENT_READY')
+  , USER_CHANGES: metrics.timer('message.USER_CHANGES')
+  , USERINFO_UPDATE: metrics.timer('message.USERINFO_UPDATE')
+  , CHAT_MESSAGE: metrics.timer('message.CHAT_MESSAGE')
+  , CLIENT_MESSAGE: metrics.timer('message.CLIENT_MESSAGE')
+  }
+  
 exports.handleMessage = function(client, message)
 { 
   if(message == null)
@@ -162,6 +173,13 @@ exports.handleMessage = function(client, message)
   {
     messageLogger.warn("Message has no type attribute!");
     return;
+  }
+  
+  client.starttime = new Date();
+  if (message.type === 'CLIENT_READY') {
+    client.timer = timers['CLIENT_READY']
+  } else if (message.data && message.data.type && timers[message.data.type]){
+    client.timer = timers[message.data.type]
   }
   
   //Check what type of message we get and delegate to the other methodes
@@ -190,6 +208,7 @@ exports.handleMessage = function(client, message)
   {
     handleSuggestUserName(client, message);
   }
+  
   //if the message type is unkown, throw an exception
   else
   {
@@ -252,7 +271,7 @@ function handleChatMessage(client, message)
       {
         socketio.sockets.sockets[pad2sessions[padId][i]].json.send(msg);
       }
-      
+      client.timer.update((new Date()) - client.starttime);
       callback();
     }
   ], function(err)
@@ -292,6 +311,7 @@ function handleSuggestUserName(client, message)
       break;
     }
   }
+  client.timer.update((new Date()) - client.starttime)
 }
 
 /**
@@ -334,6 +354,7 @@ function handleUserInfoUpdate(client, message)
       socketio.sockets.sockets[pad2sessions[padId][i]].json.send(message);
     }
   }
+  client.timer.update((new Date()) - client.starttime)
 }
 
 /**
@@ -401,6 +422,7 @@ function handleUserChanges(client, message)
       {
         console.warn("Can't apply USER_CHANGES "+changeset+", cause it faild checkRep");
         client.json.send({disconnect:"badChangeset"});
+        client.timer.update((new Date()) - client.starttime)
         return;
       }
         
@@ -447,6 +469,7 @@ function handleUserChanges(client, message)
       {
         console.warn("Can't apply USER_CHANGES "+changeset+" with oldLen " + Changeset.oldLen(changeset) + " to document of length " + prevText.length);
         client.json.send({disconnect:"badChangeset"});
+        client.timer.update((new Date()) - client.starttime)
         callback();
         return;
       }
@@ -466,6 +489,7 @@ function handleUserChanges(client, message)
       }
         
       exports.updatePadClients(pad, callback);
+      client.timer.update((new Date()) - client.starttime)
     }
   ], function(err)
   {
@@ -813,6 +837,8 @@ function handleClientReady(client, message)
       sessioninfos[client.id].rev = pad.getHeadRevisionNumber();
       sessioninfos[client.id].author = author;
       
+      client.timer.update((new Date()) - client.starttime)
+      
       //prepare the notification for the other users on the pad, that this user joined
       var messageToTheOtherUsers = {
         "type": "COLLABROOM",
@@ -832,6 +858,8 @@ function handleClientReady(client, message)
       {
         messageToTheOtherUsers.data.userInfo.name = authorName;
       }
+      
+      var starttime = new Date()
       
       //Run trough all sessions of this pad
       async.forEach(pad2sessions[message.padId], function(sessionID, callback)
@@ -883,11 +911,15 @@ function handleClientReady(client, message)
                   }
                 }
               };
+              
               client.json.send(messageToNotifyTheClientAboutTheOthers);
             }
           }
         ], callback);        
-      }, callback);
+      }, function () {
+        callback()
+        timers['notify_CLIENT_READY'].update((new Date()) - starttime)
+      });
     }
   ],function(err)
   {

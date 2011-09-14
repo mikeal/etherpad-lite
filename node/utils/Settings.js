@@ -20,6 +20,7 @@
  */
 
 var fs = require("fs");
+var path = require("path");
 
 /**
  * The IP ep-lite should listen to
@@ -37,7 +38,7 @@ exports.dbType = "dirty";
 /**
  * This setting is passed with dbType to ueberDB to set up the database
  */
-exports.dbSettings = { "filename" : "../var/dirty.db" };
+exports.dbSettings = { "filename" : path.join(__dirname, "../var/dirty.db") };
 /**
  * The default Text of a new pad
  */
@@ -58,7 +59,7 @@ exports.abiword = null;
 exports.loglevel = "INFO";
 
 //read the settings sync
-var settingsStr = fs.readFileSync("../settings.json").toString();
+var settingsStr = fs.readFileSync(path.join(__dirname, "../../settings.json")).toString();
 
 //remove all comments
 settingsStr = settingsStr.replace(/\*([^*]|[\r\n]|(\*+([^*/]|[\r\n])))*\*+/gm,"").replace(/#.*/g,"").replace(/\/\/.*/g,"");

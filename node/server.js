@@ -213,7 +213,6 @@ async.waterfall([
     app.get('/static/*', function(req, res)
     {
       res.header("Server", serverName);
-      console.error(req.url)
       if (!filemap[req.url]) {
         res.setHeader('content-type', 'text/plain')
         res.statusCode = 404

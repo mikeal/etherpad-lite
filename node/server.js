@@ -23,10 +23,15 @@
 var nopt = require('nopt');
 var log4js = require('log4js');
 var os = require("os");
+var events = require("events");
 var socketio = require('socket.io');
 var fs = require('fs');
+var util = require('util');
+var crypto = require('crypto');
 var settings = require('./utils/Settings');
 var db = require('./db/DB');
+var mimetypes = require('./mimetypes');
+var rfc822 = require('./rfc822');
 var async = require('async');
 var express = require('express');
 var path = require('path');
@@ -40,6 +45,7 @@ var readOnlyManager;
 var padManager;
 var securityManager;
 var socketIORouter;
+var filemap = {};
 
 var argv = nopt({
     'port':Number
@@ -49,6 +55,64 @@ var argv = nopt({
     'p': ['--port']
     , 'e': ['--environment']
 }, process.argv);
+
+// clone function
+function clone (self) {
+  var newObj = (self instanceof Array) ? [] : {};
+  for (i in self) {
+    if (i == 'clone') continue;
+    if (self[i] && typeof self[i] == "object") {
+      newObj[i] = self[i].clone();
+    } else newObj[i] = self[i]
+  } return newObj;
+};
+
+// Buffer response
+function HTTPBuffer (buffer, headers) {
+  var self = this
+  if (!Buffer.isBuffer(buffer)) buffer = new Buffer(buffer)
+  self.writable = true
+  self.readable = true
+  self.buffer = buffer
+
+  self.md5 = crypto.createHash('md5').update(self.buffer).digest("hex");
+
+  self.created = new Date()
+  self.headers = headers
+  self.headers['content-length'] = buffer.length
+  self.headers['last-modified'] = rfc822.getRFC822Date(self.created)
+  self.headers['etag'] = self.md5
+  self.on('request', function (req, resp) {
+    if (req.method === 'PUT' || req.method === 'POST') {
+      resp.writeHead(405)
+      resp.end()
+      return
+    }
+    var headers = clone(self.headers)
+    // It's safer to just do direct timestamp matching because javascript comparison and Date objects
+    // are all kinds of screwed up.
+    if (req.headers['if-modified-since'] && req.headers['if-modified-since'] === self.headers['last-modified']) {
+      headers['content-length'] = 0
+      resp.writeHead(304, headers)
+      resp.end()
+      return
+    }
+
+    if (req.headers['if-none-match'] && req.headers['if-none-match'] === self.headers['etag']) {
+      headers['content-length'] = 0
+      resp.writeHead(304, headers)
+      resp.end()
+      return
+    }
+
+    resp.writeHead(200, headers);
+    if (!req.method !== 'HEAD') {
+      resp.write(self.buffer)
+    }
+    resp.end()
+  })
+}
+util.inherits(HTTPBuffer, events.EventEmitter)
 
 //try to get the git version
 var version = "";
@@ -149,9 +213,14 @@ async.waterfall([
     app.get('/static/*', function(req, res)
     {
       res.header("Server", serverName);
-      var filePath = path.normalize(__dirname + "/.." +
-                                    req.url.replace(/\.\./g, '').split("?")[0]);
-      res.sendfile(filePath, { maxAge: exports.maxAge });
+      console.error(req.url)
+      if (!filemap[req.url]) {
+        res.setHeader('content-type', 'text/plain')
+        res.statusCode = 404
+        res.end('Not found')
+      } else {
+        filemap[req.url].emit('request', req, res)
+      }
     });
 
     //serve minified files
@@ -416,10 +485,43 @@ async.waterfall([
       });
     });
 
-    //let the server listen
-    var port = argv.port || settings.port;
-    app.listen(port, settings.ip);
-    console.log("Server is listening at " + settings.ip + ":" + port);
+    //load all files in to memory
+    var walkDir = function (dir, p, cb) {
+      var count = 0
+      fs.readdir(dir, function (e, files) {
+        if (e) throw e
+        files.forEach(function (f) {
+          count += 1
+          var full = path.join(dir, f)
+          fs.stat(full, function (e, stat) {
+            if (e) throw e
+            if (stat.isDirectory()) {
+              walkDir(full, p + '/' + f, function () {
+                count--
+                if (count === 0) cb()
+              })
+            } else {
+              fs.readFile(full, function (e, data) {
+                filemap[p + '/' + f] =
+                  new HTTPBuffer(data, {'content-type':mimetypes.lookup(f.slice(f.lastIndexOf('.')+1))})
+                count--
+                if (count === 0) cb()
+              })
+            }
+          })
+          if (count === 0) cb()
+        })
+      })
+    }
+    walkDir(path.join(__dirname, '..', 'static'), '/static', function () {
+      //let the server listen
+      var port = argv.port || settings.port;
+      app.listen(port, settings.ip);
+      console.log("Server is listening at " + settings.ip + ":" + port);
+    })
+
+
+
 
     var onShutdown = false;
     var shutdownCalled = false;

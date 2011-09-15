@@ -503,6 +503,19 @@ async.waterfall([
               fs.readFile(full, function (e, data) {
                 filemap[p + '/' + f] =
                   new HTTPBuffer(data, {'content-type':mimetypes.lookup(f.slice(f.lastIndexOf('.')+1))})
+                filemap[p + '/' + f].mtime = stat.mtime
+                if (settings.production !== true) {
+                  fs.watchFile(full, function (stat) {
+                    if (filemap[p + '/' + f].mtime !== stat.mtime) {
+                      fs.readFile(full, function (e, data) {
+                        filemap[p + '/' + f] =
+                          new HTTPBuffer(data, {'content-type':mimetypes.lookup(f.slice(f.lastIndexOf('.')+1))})
+                        filemap[p + '/' + f].mtime = stat.mtime
+                      })
+                    }
+
+                  })
+                }
                 count--
                 if (count === 0) cb()
               })
